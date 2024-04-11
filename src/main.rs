@@ -12,6 +12,7 @@ use serde_json::{Map, Value};
 use thirtyfour::{cookie::SameSite, prelude::*};
 use tokio::{io::AsyncBufReadExt, time::sleep};
 
+// TODO: replace with fzf
 async fn search_anime(anime: &str) -> String {
     let url = "https://api.hikka.io/anime?page=1&size=5";
     let body_data = format!(
@@ -205,7 +206,7 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
     // let mut credentials = HashMap::new();
     // credentials.insert("email", ""); // TODO: store credentials in secure
     // credentials.insert("password", "");
-    // let client = reqwest::Client::new();
+    let client = reqwest::Client::new();
     // client
     //     .post("https://api.hikka.io/auth/login")
     //     .json(&credentials)
@@ -213,8 +214,32 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
     //     .send()
     //     .await?;
     let hikka_token = std::env::var("AUTH_TOKEN")?;
+    let mut auto = false;
 
-    // TODO: make option moderator or user (to auto approve or not)
+    let role_response: serde_json::Value = client
+        .get("https://api.hikka.io/user/me")
+        .header("auth", hikka_token.clone())
+        .send()
+        .await?
+        .json()
+        .await?;
+    let role = role_response["role"].as_str().unwrap();
+
+    if role == "moderator" {
+        print!("Do you want to auto approve edits? [Y/n] ");
+        io::stdout().flush().unwrap();
+
+        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
+        let mut buf = String::new();
+        reader.read_line(&mut buf).await?;
+
+        match buf.trim() {
+            "Y" | "y" if buf.is_empty() => auto = true,
+            "N" | "n" => auto = false,
+            _ => auto = true,
+        }
+    }
+
     let mut cookie = Cookie::new("auth", hikka_token); // TODO: store token in secure
     let mut caps = DesiredCapabilities::firefox();
 
@@ -360,10 +385,21 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
 
                 let send_elem = driver
                     .find(By::XPath(
+                        "/html/body/main/div/div[1]/form/div[2]/div[2]/button[1]",
+                    ))
+                    .await?;
+
+                let auto_send_elem = driver
+                    .find(By::XPath(
                         "/html/body/main/div/div[1]/form/div[2]/div[2]/button[2]",
                     ))
                     .await?;
-                send_elem.click().await?;
+
+                if auto {
+                    auto_send_elem.click().await?;
+                } else {
+                    send_elem.click().await?;
+                }
 
                 // TODO: Check if edit has been approved
             } else {
