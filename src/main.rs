@@ -1,7 +1,7 @@
 use std::{
     collections::HashMap,
     error::Error,
-    io::{self, Write},
+    io::{self, Cursor, Write},
     process::{exit, Command, Stdio},
     time::Duration,
 };
@@ -9,6 +9,7 @@ use std::{
 use dotenvy::dotenv;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use serde_json::{Map, Value};
+use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
 use tokio::{io::AsyncBufReadExt, time::sleep};
 
@@ -423,33 +424,45 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(1);
     });
 
-    println!("HikkaCLI | Tools to interact with hikka.io");
-
-    print!("Options: \n1. Search word in desc (characters only) \n2. Translate characters from anime (WebDriver) \nEnter option: ");
-    io::stdout().flush().unwrap();
-
     let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-    let mut option_app = String::new();
-    reader.read_line(&mut option_app).await?;
 
-    match option_app.trim() {
-        "1" => {
-            print!("Enter a word: ");
-            io::stdout().flush().unwrap();
-            let mut word = String::new();
-            reader.read_line(&mut word).await?;
+    let options = SkimOptionsBuilder::default()
+        .height(Some("100%"))
+        .multi(true)
+        .build()
+        .unwrap();
 
-            search_word_ch(word.trim()).await?;
+    let input =
+        "Search word in desc (characters only)\nTranslate characters from anime (WebDriver)"
+            .to_string();
+
+    let item_reader = SkimItemReader::default();
+    let items = item_reader.of_bufread(Cursor::new(input));
+
+    let selected_items = Skim::run_with(&options, Some(items))
+        .map(|out| out.selected_items)
+        .unwrap_or_default();
+
+    for item in selected_items.iter() {
+        match item.output() {
+            Cow::Borrowed("Search word in desc (characters only)") => {
+                print!("Enter a word: ");
+                io::stdout().flush().unwrap();
+                let mut word = String::new();
+                reader.read_line(&mut word).await?;
+
+                search_word_ch(word.trim()).await?;
+            }
+            Cow::Borrowed("Translate characters from anime (WebDriver)") => loop {
+                print!("Enter anime title in ua: ");
+                io::stdout().flush().unwrap();
+                let mut title = String::new();
+                reader.read_line(&mut title).await?;
+
+                trans_char_anime_webdriver(&search_anime(title.trim()).await).await?;
+            },
+            _ => todo!(),
         }
-        "2" => loop {
-            print!("Enter anime title in ua: ");
-            io::stdout().flush().unwrap();
-            let mut title = String::new();
-            reader.read_line(&mut title).await?;
-
-            trans_char_anime_webdriver(&search_anime(title.trim()).await).await?;
-        },
-        &_ => todo!(),
     }
 
     Ok(())
