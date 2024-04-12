@@ -2,7 +2,7 @@ use std::{
     collections::HashMap,
     error::Error,
     io::{self, Cursor, Write},
-    process::{exit, Command, Stdio},
+    process::{Command, Stdio},
     time::Duration,
 };
 
@@ -13,9 +13,9 @@ use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
 use tokio::{io::AsyncBufReadExt, time::sleep};
 
-// TODO: replace with fzf
+// TODO: refactor & make dynamic search
 async fn search_anime(anime: &str) -> String {
-    let url = "https://api.hikka.io/anime?page=1&size=5";
+    let url = "https://api.hikka.io/anime?page=1&size=20";
     let body_data = format!(
         r#"{{"query": "{}", "sort": ["start_date:asc", "scored_by:desc"]}}"#,
         anime
@@ -26,28 +26,49 @@ async fn search_anime(anime: &str) -> String {
     let data: serde_json::Value = response.unwrap().json().await.unwrap();
     let list = data["list"].as_array().unwrap();
 
-    for (i, element) in list.iter().enumerate() {
-        println!(
-            "{}. {} ({})",
-            i + 1,
-            element["title_ua"].as_str().unwrap(),
-            element["year"]
+    let options = SkimOptionsBuilder::default()
+        .height(Some("100%"))
+        .multi(true)
+        .build()
+        .unwrap();
+
+    let mut input: Vec<String> = Vec::new();
+
+    for element in list {
+        input.push(
+            format!(
+                "{} ({})",
+                element["title_ua"].as_str().unwrap(),
+                element["year"]
+            )
+            .to_string(),
         );
     }
 
-    print!("Enter option: ");
-    io::stdout().flush().unwrap();
-    let mut opt = String::new();
-    let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-    reader.read_line(&mut opt).await.unwrap();
+    let final_input = input.join("\n");
 
-    if opt == "\n" {
-        exit(1);
+    let item_reader = SkimItemReader::default();
+    let items = item_reader.of_bufread(Cursor::new(final_input));
+
+    let selected_items = Skim::run_with(&options, Some(items))
+        .map(|out| out.selected_items)
+        .unwrap_or_default();
+
+    for item in selected_items.iter() {
+        let item_col = item.output();
+
+        let mut title_arr: Vec<&str> = item_col.split(' ').collect();
+        title_arr.pop();
+        let title = title_arr.join(" ");
+
+        for element in list {
+            if title == element["title_ua"].as_str().unwrap() {
+                return element["slug"].as_str().unwrap().to_string();
+            }
+        }
     }
 
-    let opt_alt: usize = opt.trim().parse().unwrap();
-    let res = list[opt_alt - 1]["slug"].as_str().unwrap();
-    res.to_string()
+    "Not found".to_string()
 }
 
 // TODO: Rewrite to search word in characters instead of edits
