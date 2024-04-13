@@ -15,7 +15,7 @@ use tokio::{io::AsyncBufReadExt, time::sleep};
 
 // TODO: refactor & make dynamic search
 async fn search_anime(anime: &str) -> String {
-    let url = "https://api.hikka.io/anime?page=1&size=20";
+    let url = "https://api.hikka.io/anime?page=1&size=100";
     let body_data = format!(
         r#"{{"query": "{}", "sort": ["start_date:asc", "scored_by:desc"]}}"#,
         anime
@@ -29,6 +29,7 @@ async fn search_anime(anime: &str) -> String {
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
         .multi(true)
+        .prompt(Some("Select anime: "))
         .build()
         .unwrap();
 
@@ -257,7 +258,7 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
 
         match buf.trim() {
             "Y" | "y" if buf.is_empty() => auto = true,
-            "N" | "n" => auto = false,
+            "N" | "n" => (),
             _ => auto = true,
         }
     }
@@ -454,7 +455,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
         .unwrap();
 
     let input =
-        "Search word in desc (characters only)\nTranslate characters from anime (WebDriver)"
+        "Translate characters from anime (WebDriver)\nSearch word in desc (characters only)"
             .to_string();
 
     let item_reader = SkimItemReader::default();
