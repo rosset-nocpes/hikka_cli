@@ -26,6 +26,7 @@ async fn search_anime(anime: &str) -> String {
     let data: serde_json::Value = response.unwrap().json().await.unwrap();
     let list = data["list"].as_array().unwrap();
 
+    // TODO: ignore case matching for ua language
     let options = SkimOptionsBuilder::default()
         .height(Some("100%"))
         .multi(true)
@@ -39,7 +40,13 @@ async fn search_anime(anime: &str) -> String {
         input.push(
             format!(
                 "{} ({})",
-                element["title_ua"].as_str().unwrap(),
+                if !element["title_ua"].is_null() {
+                    element["title_ua"].as_str().unwrap()
+                } else if !element["title_en"].is_null() {
+                    element["title_en"].as_str().unwrap()
+                } else {
+                    element["title_ja"].as_str().unwrap()
+                },
                 element["year"]
             )
             .to_string(),
@@ -63,13 +70,31 @@ async fn search_anime(anime: &str) -> String {
         let title = title_arr.join(" ");
 
         for element in list {
-            if title == element["title_ua"].as_str().unwrap() {
-                return element["slug"].as_str().unwrap().to_string();
+            let title_ua = if !element["title_ua"].is_null() {
+                element["title_ua"].as_str().unwrap()
+            } else {
+                ""
+            };
+            let title_en = if !element["title_en"].is_null() {
+                element["title_en"].as_str().unwrap()
+            } else {
+                ""
+            };
+            let title_ja = if !element["title_ja"].is_null() {
+                element["title_ja"].as_str().unwrap()
+            } else {
+                ""
+            };
+
+            let slug = element["slug"].as_str().unwrap().to_string();
+
+            if title == title_ua || title == title_en || title == title_ja {
+                return slug;
             }
         }
     }
 
-    "Not found".to_string()
+    "".to_string()
 }
 
 // TODO: Rewrite to search word in characters instead of edits
@@ -476,7 +501,7 @@ async fn main() -> Result<(), Box<dyn Error>> {
                 search_word_ch(word.trim()).await?;
             }
             Cow::Borrowed("Translate characters from anime (WebDriver)") => loop {
-                print!("Enter anime title in ua: ");
+                print!("Enter anime title: ");
                 io::stdout().flush().unwrap();
                 let mut title = String::new();
                 reader.read_line(&mut title).await?;
