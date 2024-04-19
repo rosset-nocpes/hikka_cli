@@ -6,6 +6,15 @@ CLI tool to interact with hikka.io
 - [ ] Bulk translate
 - [x] Find words in description of chraracter via edits
 
+## How to login
+For now you need to get auth token from hikka. To do this open devtools, go to Storage tab (Firefox) or Application tab (Chrome). And just copy value of `auth`.
+
+After this create file `.env` in folder where is app located, with this content:
+
+```bash
+AUTH_TOKEN=*your auth token*
+```
+
 ## Build
 1. Clone repo
 
