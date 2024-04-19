@@ -1,10 +1,14 @@
 # hikkaCLI
 CLI tool to interact with hikka.io
 
-### **Features**:
+## **Features**:
 - [x] Translate characters from anime
 - [ ] Bulk translate
 - [x] Find words in description of chraracter via edits
+
+## Requirements
+- Rust `>=1.76.0`
+- geckodriver
 
 ## How to login
 For now you need to get auth token from hikka. To do this open devtools, go to Storage tab (Firefox) or Application tab (Chrome). And just copy value of `auth`.
