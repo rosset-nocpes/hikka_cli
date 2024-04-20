@@ -7,7 +7,7 @@ CLI tool to interact with hikka.io
 - [x] Find words in description of chraracter via edits
 
 ## Requirements
-- Rust `>=1.76.0`
+- Rust `>=1.76.0` (for build only)
 - geckodriver
 
 ## How to login
