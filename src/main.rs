@@ -8,7 +8,6 @@ use std::{
 
 use dotenvy::dotenv;
 use rustyline::{error::ReadlineError, DefaultEditor};
-use serde_json::{Map, Value};
 use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
 use tokio::{io::AsyncBufReadExt, time::sleep};
