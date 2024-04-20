@@ -311,17 +311,9 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
                     .find(By::XPath("/html/body/main/div/div[1]/form/div[1]/div[1]"))
                     .await?;
                 name_elem.click().await?;
-                let button_elem = driver
-                    .find(By::XPath(
-                        "/html/body/main/div/div[1]/form/div[1]/div[1]/div[2]/div/button[1]",
-                    ))
-                    .await?;
+                let button_elem = name_elem.find(By::XPath("div[2]/div/button[1]")).await?;
                 button_elem.click().await?;
-                let textname_elem = driver
-                    .find(By::XPath(
-                        "/html/body/main/div/div[1]/form/div[1]/div[1]/div[2]/div[2]/input",
-                    ))
-                    .await?;
+                let textname_elem = name_elem.find(By::XPath("div[2]/div[2]/input")).await?;
                 textname_elem.send_keys(name_input?).await?;
 
                 let desc_elem = elem_edits.find(By::Tag("textarea")).await?;
@@ -331,12 +323,12 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
                 driver.enter_frame(0).await?;
 
                 if !driver
-                    .find_all(By::XPath("/html/body/div/div/div[1]/div/label/input"))
+                    .find_all(By::XPath("//*[@class='ctp-checkbox-label']/input"))
                     .await?
                     .is_empty()
                 {
                     driver
-                        .find(By::XPath("/html/body/div/div/div[1]/div/label/input"))
+                        .find(By::XPath("//*[@class='ctp-checkbox-label']/input"))
                         .await?
                         .click()
                         .await?;
