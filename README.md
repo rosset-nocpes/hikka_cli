@@ -4,6 +4,11 @@ CLI tool to interact with hikka.io
 
 ## **Features**
 
+![powered_by_hikka](https://github.com/rosset-nocpes/hikka_cli/assets/53056080/fb91ce88-e0b8-40f7-9124-882bd6c5218e)
+
+![preview](https://github.com/rosset-nocpes/hikka_cli/assets/53056080/1e5cfac2-e4c9-4019-b001-f355e426c8b6)
+
+## **Features**:
 - [x] Translate characters from anime
 - [ ] Bulk translate
 - [x] Find words in description of chraracter via edits
