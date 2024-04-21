@@ -9,6 +9,7 @@ use std::{
 };
 
 use dotenvy::dotenv;
+use rpassword::prompt_password;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
@@ -53,10 +54,7 @@ impl HikkaUser {
         let mut email = String::new();
         reader.read_line(&mut email).await?;
 
-        print!("Password: ");
-        io::stdout().flush().unwrap();
-        let mut password = String::new();
-        reader.read_line(&mut password).await?;
+        let password = prompt_password("Password: ").unwrap();
 
         let client = reqwest::Client::new();
 
@@ -135,7 +133,7 @@ impl HikkaUser {
         ))?;
 
         self.username = user["username"].to_string();
-        self.moderator = user["role"] == "moderator";
+        self.moderator = user["role"] == "moderator" || user["role"] == "admin";
         self.auth = true;
         self.auth_token = auth_token.value;
 
