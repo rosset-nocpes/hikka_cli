@@ -347,7 +347,7 @@ async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), 
     let data: serde_json::Value = response.json().await?;
     let pages = data["pagination"]["pages"].as_u64().unwrap();
 
-    for page in 7..=pages {
+    for page in 1..=pages {
         let url_p = format!("{}?page={}&size=100", url, page);
         let response = reqwest::get(url_p).await;
 
