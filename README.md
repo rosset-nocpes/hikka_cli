@@ -1,11 +1,12 @@
 # hikkaCLI
-CLI tool to interact with hikka.io
+CLI tool to interact with [hikka.io](https://hikka.io)
 
 ![powered_by_hikka](https://rosset-nocpes.github.io/ua-badges/src/powered-by-hikka.svg)
 
 ![preview](https://github.com/rosset-nocpes/hikka_cli/assets/53056080/1e5cfac2-e4c9-4019-b001-f355e426c8b6)
 
 ## **Features**:
+- [ ] Integrated player (similar to [ani-cli](https://github.com/pystardust/ani-cli))
 - [x] Translate characters from anime
 - [ ] Bulk translate
 - [x] Find words in description of chraracter via edits
