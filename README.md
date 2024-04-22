@@ -1,7 +1,7 @@
 # hikkaCLI
 CLI tool to interact with [hikka.io](https://hikka.io)
 
-![powered_by_hikka](https://rosset-nocpes.github.io/ua-badges/src/powered-by-hikka.svg)
+[![powered_by_hikka](https://rosset-nocpes.github.io/ua-badges/src/powered-by-hikka.svg)](https://hikka.io/)
 
 ![preview](https://github.com/rosset-nocpes/hikka_cli/assets/53056080/1e5cfac2-e4c9-4019-b001-f355e426c8b6)
 
