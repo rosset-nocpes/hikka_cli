@@ -1,16 +1,157 @@
 use std::{
     collections::HashMap,
+    env,
     error::Error,
-    io::{self, Cursor, Write},
+    fs::{remove_file, File},
+    io::{self, BufRead, BufReader, Cursor, Write},
     process::{Command, Stdio},
     time::Duration,
 };
 
 use dotenvy::dotenv;
+use rpassword::prompt_password;
 use rustyline::{error::ReadlineError, DefaultEditor};
 use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
 use tokio::{io::AsyncBufReadExt, time::sleep};
+
+struct HikkaUser {
+    username: String,
+    moderator: bool,
+    auth: bool,
+    auth_token: String,
+}
+
+impl HikkaUser {
+    async fn login(&mut self) -> Result<(), Box<dyn Error>> {
+        let url = "https://hikka.io/anime?page=1&iPage=1";
+
+        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
+
+        let mut gecko_spawner = Command::new("geckodriver")
+            .stdout(Stdio::null())
+            .stderr(Stdio::null())
+            .spawn()
+            .unwrap();
+
+        let mut caps = DesiredCapabilities::firefox();
+
+        // NOTE: Experimental
+        caps.set_headless()?;
+
+        let driver = WebDriver::new("http://localhost:4444", caps).await?;
+        driver.goto(url).await?;
+
+        // click login button
+        driver
+            .find(By::XPath("/html/body/nav/div[1]/div[2]/button[2]"))
+            .await?
+            .click()
+            .await?;
+
+        print!("Email: ");
+        io::stdout().flush().unwrap();
+        let mut email = String::new();
+        reader.read_line(&mut email).await?;
+
+        let password = prompt_password("Password: ").unwrap();
+
+        let client = reqwest::Client::new();
+
+        // enter email
+        driver
+            .find(By::XPath(
+                "/html/body/div[4]/div/div[2]/div[2]/form/div[1]/input",
+            ))
+            .await?
+            .send_keys(email)
+            .await?;
+
+        // enter password
+        driver
+            .find(By::XPath(
+                "/html/body/div[4]/div/div[2]/div[2]/form/div[2]/input",
+            ))
+            .await?
+            .send_keys(password)
+            .await?;
+
+        driver.enter_frame(0).await?;
+
+        if !driver
+            .find_all(By::XPath("//*[@class='ctp-checkbox-label']/input"))
+            .await?
+            .is_empty()
+        {
+            driver
+                .find(By::XPath("//*[@class='ctp-checkbox-label']/input"))
+                .await?
+                .click()
+                .await?;
+
+            // TODO: make dynamic check for success
+            sleep(Duration::from_secs(1)).await;
+        }
+
+        driver.enter_default_frame().await?;
+
+        // click login button in dialog
+        driver
+            .find(By::XPath(
+                "/html/body/div[4]/div/div[2]/div[2]/form/div[4]/button[1]",
+            ))
+            .await?
+            .click()
+            .await?;
+
+        sleep(Duration::from_secs(1)).await;
+
+        // get auth token from cookie
+        let auth_token = driver.get_named_cookie("auth").await?;
+
+        let user: serde_json::Value = client
+            .get("https://api.hikka.io/user/me")
+            .header("auth", auth_token.value.clone())
+            .send()
+            .await?
+            .json()
+            .await?;
+
+        gecko_spawner.kill().expect("not killed geckodriver!");
+
+        let mut storage = File::create(".env")?;
+        storage.write_fmt(format_args!(
+            "USERNAME={}\nMODERATOR={}\nAUTH={}\nAUTH_TOKEN={}",
+            user["username"].as_str().unwrap(),
+            if user["role"] == "moderator" {
+                "true"
+            } else {
+                "false"
+            },
+            "true",
+            auth_token.value.clone().as_str()
+        ))?;
+
+        self.username = user["username"].to_string();
+        self.moderator = user["role"] == "moderator" || user["role"] == "admin";
+        self.auth = true;
+        self.auth_token = auth_token.value;
+
+        Ok(())
+    }
+
+    // TODO: Logout fn
+    fn logout(&mut self) -> Result<(), Box<dyn Error>> {
+        remove_file(".env")?;
+
+        self.username = "".to_string();
+        self.moderator = false;
+        self.auth = false;
+        self.auth_token = "".to_string();
+
+        Ok(())
+    }
+}
 
 // TODO: refactor & make dynamic search
 async fn search_anime(anime: &str) -> String {
@@ -153,7 +294,11 @@ async fn search_word_ch(word: &str) -> Result<(), Box<dyn Error>> {
 }
 
 // BUG: page of character edit not always opening and crashing tool
-async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
+async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), Box<dyn Error>> {
+    if !user.auth {
+        Err("Not authorized!")?;
+    }
+
     // Creating url for anime characters
     let url = format!("https://api.hikka.io/anime/{}/characters", slug);
 
@@ -163,32 +308,9 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
         .spawn()
         .unwrap();
 
-    // INFO: Auth the user
-    // TODO: First time launch login, after store token
-    //
-    // let mut credentials = HashMap::new();
-    // credentials.insert("email", ""); // TODO: store credentials in secure
-    // credentials.insert("password", "");
-    let client = reqwest::Client::new();
-    // client
-    //     .post("https://api.hikka.io/auth/login")
-    //     .json(&credentials)
-    //     .header("captcha", "") // TODO: add captcha
-    //     .send()
-    //     .await?;
-    let hikka_token = std::env::var("AUTH_TOKEN")?;
     let mut auto = false;
 
-    let role_response: serde_json::Value = client
-        .get("https://api.hikka.io/user/me")
-        .header("auth", hikka_token.clone())
-        .send()
-        .await?
-        .json()
-        .await?;
-    let role = role_response["role"].as_str().unwrap();
-
-    if role == "moderator" {
+    if user.moderator {
         print!("Do you want to auto approve edits? [Y/n] ");
         io::stdout().flush().unwrap();
 
@@ -203,11 +325,11 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
         }
     }
 
-    let mut cookie = Cookie::new("auth", hikka_token); // TODO: store token in secure
+    let mut cookie = Cookie::new("auth", &user.auth_token); // TODO: store token in secure
     let mut caps = DesiredCapabilities::firefox();
 
     // NOTE: Experimental
-    caps.add_arg("--headless")?;
+    caps.set_headless()?;
 
     let driver = WebDriver::new("http://localhost:4444", caps).await?;
 
@@ -225,7 +347,7 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
     let data: serde_json::Value = response.json().await?;
     let pages = data["pagination"]["pages"].as_u64().unwrap();
 
-    for page in 1..=pages {
+    for page in 7..=pages {
         let url_p = format!("{}?page={}&size=100", url, page);
         let response = reqwest::get(url_p).await;
 
@@ -373,6 +495,26 @@ async fn trans_char_anime_webdriver(slug: &str) -> Result<(), Box<dyn Error>> {
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv()?;
 
+    let env_file = File::open(".env").unwrap_or_else(|_| File::create(".env").unwrap());
+    let buffered = BufReader::new(env_file);
+    let line_count = buffered.lines().count();
+
+    let mut user = if line_count == 4 {
+        HikkaUser {
+            username: env::var("USERNAME")?,
+            moderator: env::var("MODERATOR")?.parse()?,
+            auth: env::var("AUTH")?.parse()?,
+            auth_token: env::var("AUTH_TOKEN")?,
+        }
+    } else {
+        HikkaUser {
+            username: "".to_string(),
+            moderator: false,
+            auth: false,
+            auth_token: "".to_string(),
+        }
+    };
+
     tokio::spawn(async move {
         tokio::signal::ctrl_c().await.unwrap();
         std::process::exit(1);
@@ -380,44 +522,54 @@ async fn main() -> Result<(), Box<dyn Error>> {
 
     let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
 
-    let options = SkimOptionsBuilder::default()
-        .height(Some("100%"))
-        .multi(true)
-        .build()
-        .unwrap();
+    loop {
+        let options = SkimOptionsBuilder::default()
+            .height(Some("100%"))
+            .multi(true)
+            .build()
+            .unwrap();
 
-    let input =
-        "Translate characters from anime (WebDriver)\nSearch word in desc (characters only)"
-            .to_string();
+        let input = if user.auth {
+            let _logged_user = format!("Logged in {} (Logout)", user.username);
+            format!("Translate characters from anime (WebDriver)\nSearch word in desc (characters only)\nLogged in {} (Logout)", user.username)
+        } else {
+            "Login\nTranslate characters from anime (WebDriver)\nSearch word in desc (characters only)"
+            .to_string()
+        };
 
-    let item_reader = SkimItemReader::default();
-    let items = item_reader.of_bufread(Cursor::new(input));
+        let item_reader = SkimItemReader::default();
+        let items = item_reader.of_bufread(Cursor::new(input));
 
-    let selected_items = Skim::run_with(&options, Some(items))
-        .map(|out| out.selected_items)
-        .unwrap_or_default();
+        let selected_items = Skim::run_with(&options, Some(items))
+            .map(|out| out.selected_items)
+            .unwrap_or_default();
 
-    for item in selected_items.iter() {
-        match item.output() {
-            Cow::Borrowed("Search word in desc (characters only)") => {
-                print!("Enter a word: ");
-                io::stdout().flush().unwrap();
-                let mut word = String::new();
-                reader.read_line(&mut word).await?;
+        for item in selected_items.iter() {
+            match item.output() {
+                Cow::Borrowed("Search word in desc (characters only)") => {
+                    print!("Enter a word: ");
+                    io::stdout().flush().unwrap();
+                    let mut word = String::new();
+                    reader.read_line(&mut word).await?;
 
-                search_word_ch(word.trim()).await?;
+                    search_word_ch(word.trim()).await?;
+                }
+                Cow::Borrowed("Translate characters from anime (WebDriver)") => loop {
+                    print!("Enter anime title: ");
+                    io::stdout().flush().unwrap();
+                    let mut title = String::new();
+                    reader.read_line(&mut title).await?;
+
+                    trans_char_anime_webdriver(&search_anime(title.trim()).await, &user).await?;
+                },
+                Cow::Borrowed("Login") => {
+                    user.login().await?;
+                }
+                Cow::Borrowed(_logged_user) => {
+                    user.logout()?;
+                }
+                _ => todo!(),
             }
-            Cow::Borrowed("Translate characters from anime (WebDriver)") => loop {
-                print!("Enter anime title: ");
-                io::stdout().flush().unwrap();
-                let mut title = String::new();
-                reader.read_line(&mut title).await?;
-
-                trans_char_anime_webdriver(&search_anime(title.trim()).await).await?;
-            },
-            _ => todo!(),
         }
     }
-
-    Ok(())
 }

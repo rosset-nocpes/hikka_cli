@@ -12,32 +12,32 @@ CLI tool to interact with [hikka.io](https://hikka.io)
 - [x] Find words in description of chraracter via edits
 
 ## Requirements
+
 - Rust `>=1.76.0` (for build only)
 - geckodriver
 
-## How to login
-For now you need to get auth token from hikka. To do this open devtools, go to Storage tab (Firefox) or Application tab (Chrome). And just copy value of `auth`.
+## How to get
 
-After this create file `.env` in folder where is app located, with this content:
+### GitHub Actions
 
-```bash
-AUTH_TOKEN=*your auth token*
-```
+Grub latest build from GitHub Actions: https://github.com/rosset-nocpes/hikka_cli/actions?query=branch%3Amaster
 
-## Build
+### Build
+
 1. Clone repo
 
 ```bash
 git clone https://github.com/rosset-nocpes/hikka_cli
 ```
 
-3. Build with cargo:
+2. Build with cargo:
 
 ```bash
 cargo build
 ```
 
 Or just run:
+
 ```bash
 cargo run
 ```
