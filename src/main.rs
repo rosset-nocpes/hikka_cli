@@ -3,17 +3,15 @@ use std::{
     env,
     error::Error,
     fs::{remove_file, File},
-    io::{self, BufRead, BufReader, Cursor, Write},
+    io::{BufRead, BufReader, Write},
     process::{Command, Stdio},
     time::Duration,
 };
 
+use dialoguer::{theme::ColorfulTheme, Confirm, FuzzySelect, Input, Password, Select};
 use dotenvy::dotenv;
-use rpassword::prompt_password;
-use rustyline::{error::ReadlineError, DefaultEditor};
-use skim::{prelude::*, Skim};
 use thirtyfour::{cookie::SameSite, prelude::*};
-use tokio::{io::AsyncBufReadExt, time::sleep};
+use tokio::time::sleep;
 
 struct HikkaUser {
     username: String,
@@ -22,11 +20,10 @@ struct HikkaUser {
     auth_token: String,
 }
 
+// TODO: change method of storing data
 impl HikkaUser {
     async fn login(&mut self) -> Result<(), Box<dyn Error>> {
         let url = "https://hikka.io/anime?page=1&iPage=1";
-
-        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
 
         let mut gecko_spawner = Command::new("geckodriver")
             .stdout(Stdio::null())
@@ -49,12 +46,26 @@ impl HikkaUser {
             .click()
             .await?;
 
-        print!("Email: ");
-        io::stdout().flush().unwrap();
-        let mut email = String::new();
-        reader.read_line(&mut email).await?;
+        let email: String = Input::with_theme(&ColorfulTheme::default())
+            .with_prompt("Email")
+            .validate_with({
+                let mut force = None;
+                move |input: &String| -> Result<(), &str> {
+                    if input.contains('@') || force.as_ref().map_or(false, |old| old == input) {
+                        Ok(())
+                    } else {
+                        force = Some(input.clone());
+                        Err("This is not a mail address; type the same value again to force use")
+                    }
+                }
+            })
+            .interact_text()
+            .unwrap();
 
-        let password = prompt_password("Password: ").unwrap();
+        let password = Password::with_theme(&ColorfulTheme::default())
+            .with_prompt("Password")
+            .interact()
+            .unwrap();
 
         let client = reqwest::Client::new();
 
@@ -132,7 +143,7 @@ impl HikkaUser {
             auth_token.value.clone().as_str()
         ))?;
 
-        self.username = user["username"].to_string();
+        self.username = user["username"].as_str().unwrap().to_string();
         self.moderator = user["role"] == "moderator" || user["role"] == "admin";
         self.auth = true;
         self.auth_token = auth_token.value;
@@ -140,7 +151,6 @@ impl HikkaUser {
         Ok(())
     }
 
-    // TODO: Logout fn
     fn logout(&mut self) -> Result<(), Box<dyn Error>> {
         remove_file(".env")?;
 
@@ -166,14 +176,6 @@ async fn search_anime(anime: &str) -> String {
     let data: serde_json::Value = response.unwrap().json().await.unwrap();
     let list = data["list"].as_array().unwrap();
 
-    // TODO: ignore case matching for ua language
-    let options = SkimOptionsBuilder::default()
-        .height(Some("100%"))
-        .multi(true)
-        .prompt(Some("Select anime: "))
-        .build()
-        .unwrap();
-
     let mut input: Vec<String> = Vec::new();
 
     for element in list {
@@ -193,44 +195,40 @@ async fn search_anime(anime: &str) -> String {
         );
     }
 
-    let final_input = input.join("\n");
+    let selections = &input;
 
-    let item_reader = SkimItemReader::default();
-    let items = item_reader.of_bufread(Cursor::new(final_input));
+    let selection = FuzzySelect::with_theme(&ColorfulTheme::default())
+        .with_prompt("Select anime")
+        .default(0)
+        .items(&selections[..])
+        .interact()
+        .unwrap();
 
-    let selected_items = Skim::run_with(&options, Some(items))
-        .map(|out| out.selected_items)
-        .unwrap_or_default();
+    let mut title_arr: Vec<&str> = selections[selection].split(' ').collect();
+    title_arr.pop();
+    let title = title_arr.join(" ");
 
-    for item in selected_items.iter() {
-        let item_col = item.output();
+    for element in list {
+        let title_ua = if !element["title_ua"].is_null() {
+            element["title_ua"].as_str().unwrap()
+        } else {
+            ""
+        };
+        let title_en = if !element["title_en"].is_null() {
+            element["title_en"].as_str().unwrap()
+        } else {
+            ""
+        };
+        let title_ja = if !element["title_ja"].is_null() {
+            element["title_ja"].as_str().unwrap()
+        } else {
+            ""
+        };
 
-        let mut title_arr: Vec<&str> = item_col.split(' ').collect();
-        title_arr.pop();
-        let title = title_arr.join(" ");
+        let slug = element["slug"].as_str().unwrap().to_string();
 
-        for element in list {
-            let title_ua = if !element["title_ua"].is_null() {
-                element["title_ua"].as_str().unwrap()
-            } else {
-                ""
-            };
-            let title_en = if !element["title_en"].is_null() {
-                element["title_en"].as_str().unwrap()
-            } else {
-                ""
-            };
-            let title_ja = if !element["title_ja"].is_null() {
-                element["title_ja"].as_str().unwrap()
-            } else {
-                ""
-            };
-
-            let slug = element["slug"].as_str().unwrap().to_string();
-
-            if title == title_ua || title == title_en || title == title_ja {
-                return slug;
-            }
+        if title == title_ua || title == title_en || title == title_ja {
+            return slug;
         }
     }
 
@@ -311,17 +309,14 @@ async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), 
     let mut auto = false;
 
     if user.moderator {
-        print!("Do you want to auto approve edits? [Y/n] ");
-        io::stdout().flush().unwrap();
+        let buf = Confirm::with_theme(&ColorfulTheme::default())
+            .with_prompt("Do you want to auto approve edits?")
+            .default(true)
+            .interact()
+            .unwrap();
 
-        let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-        let mut buf = String::new();
-        reader.read_line(&mut buf).await?;
-
-        match buf.trim() {
-            "Y" | "y" if buf.is_empty() => auto = true,
-            "N" | "n" => (),
-            _ => auto = true,
+        if buf {
+            auto = true;
         }
     }
 
@@ -374,58 +369,38 @@ async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), 
                 // let waka_kana_ua = element["character"]["name_ja"].to_string().to_romaji();
 
                 // creating interactive input & waiting for input
-                // WARN: Experimental
-                let mut rl = DefaultEditor::new()?;
-                let name_input = rl.readline(
-                    format!(
-                        "{} | {} : ",
-                        if !name_en.is_null() {
-                            name_en.as_str().unwrap()
-                        } else {
-                            "-"
-                        },
-                        if !name_ja.is_null() {
-                            name_ja.as_str().unwrap()
+                let name_input: String = Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt(
+                        format!(
+                            "{} | {}",
+                            if !name_en.is_null() {
+                                name_en.as_str().unwrap()
+                            } else {
+                                "-"
+                            },
+                            if !name_ja.is_null() {
+                                name_ja.as_str().unwrap()
 
-                        // TODO: integrate DeepL and 10ten
-                        } else {
-                            "-"
-                        },
-                        // if !name_ja.is_null() {
-                        //     waka_kana_ua
-                        // } else {
-                        //     "-".to_string()
-                        // }
+                            // TODO: integrate DeepL and 10ten
+                            } else {
+                                "-"
+                            },
+                            // if !name_ja.is_null() {
+                            //     waka_kana_ua
+                            // } else {
+                            //     "-".to_string()
+                            // }
+                        )
+                        .as_str(),
                     )
-                    .as_str(),
-                );
+                    .allow_empty(true)
+                    .interact_text()
+                    .unwrap();
 
-                // if user enters button <ENTER>, skip character
-                match name_input {
-                    Ok(ref line) => {
-                        if line.is_empty() {
-                            continue;
-                        }
-                    }
-                    Err(ReadlineError::Interrupted) => {
-                        gecko_spawner.kill().expect("not killed!");
-                    }
-                    _ => todo!(),
+                // if user enters button <ENTER>, skip characters
+                if name_input.trim().is_empty() {
+                    continue;
                 }
-
-                // let mut inner_map = Map::new();
-                // inner_map.insert(
-                //     "name_ua".to_string(),
-                //     Value::String(name_input.trim().to_string()),
-                // );
-
-                // let mut map = Map::new();
-                // map.insert(
-                //     "description".to_string(),
-                //     Value::String("Переклав ім'я (via HikkaCLI)".to_string()),
-                // );
-                // map.insert("auto".to_string(), Value::Bool(true));
-                // map.insert("after".to_string(), Value::Object(inner_map));
 
                 let elem_edits = driver.find(By::Tag("form")).await?;
                 let name_elem = driver
@@ -435,7 +410,7 @@ async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), 
                 let button_elem = name_elem.find(By::XPath("div[2]/div/button[1]")).await?;
                 button_elem.click().await?;
                 let textname_elem = name_elem.find(By::XPath("div[2]/div[2]/input")).await?;
-                textname_elem.send_keys(name_input?).await?;
+                textname_elem.send_keys(name_input).await?;
 
                 let desc_elem = elem_edits.find(By::Tag("textarea")).await?;
                 desc_elem.send_keys("Переклав ім'я (via HikkaCLI)").await?;
@@ -491,6 +466,9 @@ async fn trans_char_anime_webdriver(slug: &str, user: &HikkaUser) -> Result<(), 
     Ok(())
 }
 
+// TODO: player, ani-cli
+// fn player_integration(slug: &str, user: HikkaUser) -> Result<(), Box<dyn Error>> {}
+
 #[tokio::main]
 async fn main() -> Result<(), Box<dyn Error>> {
     dotenv()?;
@@ -520,55 +498,52 @@ async fn main() -> Result<(), Box<dyn Error>> {
         std::process::exit(1);
     });
 
-    let mut reader = tokio::io::BufReader::new(tokio::io::stdin());
-
     loop {
-        let options = SkimOptionsBuilder::default()
-            .height(Some("100%"))
-            .multi(true)
-            .build()
-            .unwrap();
-
-        let input = if user.auth {
-            let _logged_user = format!("Logged in {} (Logout)", user.username);
-            format!("Translate characters from anime (WebDriver)\nSearch word in desc (characters only)\nLogged in {} (Logout)", user.username)
+        let mut default_item = 0;
+        let login_text = if user.auth {
+            default_item = 1;
+            format!("Logged in {} (Logout)", user.username)
         } else {
-            "Login\nTranslate characters from anime (WebDriver)\nSearch word in desc (characters only)"
-            .to_string()
+            "Login".to_string()
         };
 
-        let item_reader = SkimItemReader::default();
-        let items = item_reader.of_bufread(Cursor::new(input));
+        let _logged_user = format!("Logged in {} (Logout)", user.username).as_str();
 
-        let selected_items = Skim::run_with(&options, Some(items))
-            .map(|out| out.selected_items)
-            .unwrap_or_default();
+        let selections = &[
+            login_text.as_str(),
+            "Translate characters from anime",
+            "Search word in desc. (characters only)",
+        ];
 
-        for item in selected_items.iter() {
-            match item.output() {
-                Cow::Borrowed("Search word in desc (characters only)") => {
-                    print!("Enter a word: ");
-                    io::stdout().flush().unwrap();
-                    let mut word = String::new();
-                    reader.read_line(&mut word).await?;
+        let selection = Select::with_theme(&ColorfulTheme::default())
+            .with_prompt("Select option")
+            .default(default_item)
+            .items(&selections[..])
+            .interact()
+            .unwrap(); // TODO: make proper exit (with geckodriver kill)
 
-                    search_word_ch(word.trim()).await?;
-                }
-                Cow::Borrowed("Translate characters from anime (WebDriver)") => loop {
-                    print!("Enter anime title: ");
-                    io::stdout().flush().unwrap();
-                    let mut title = String::new();
-                    reader.read_line(&mut title).await?;
+        match selections[selection] {
+            "Search word in desc. (characters only)" => {
+                let word: String = Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Enter a word")
+                    .interact_text()
+                    .unwrap();
 
-                    trans_char_anime_webdriver(&search_anime(title.trim()).await, &user).await?;
-                },
-                Cow::Borrowed("Login") => {
-                    user.login().await?;
-                }
-                Cow::Borrowed(_logged_user) => {
-                    user.logout()?;
-                }
-                _ => todo!(),
+                search_word_ch(word.trim()).await?;
+            }
+            "Translate characters from anime" => loop {
+                let title: String = Input::with_theme(&ColorfulTheme::default())
+                    .with_prompt("Enter anime title")
+                    .interact_text()
+                    .unwrap();
+
+                trans_char_anime_webdriver(&search_anime(title.trim()).await, &user).await?;
+            },
+            "Login" => {
+                user.login().await?;
+            }
+            _logged_user => {
+                user.logout()?;
             }
         }
     }
